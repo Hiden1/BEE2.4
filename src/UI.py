@@ -87,6 +87,7 @@ class Item:
         'id',
         'pak_id',
         'pak_name',
+        'icons',
         'names',
         'url',
         ]
@@ -136,12 +137,25 @@ class Item:
             selected_style,
             self.def_data,
             )  # type: packageLoader.ItemVariant
-        self.names = [
-            gameMan.translate(prop['name', ''])
-            for prop in
-            self.data.editor.find_all("Editor", "Subtype")
-            if prop['Palette', None] is not None
-        ]
+        self.icons = {}
+        self.names = {}
+
+        ind = 0
+        for prop in self.data.editor.find_all("Editor", "Subtype"):
+            palette = prop.find_key('Palette', [])
+            if palette:
+                icon = palette['Image']
+                if icon.endswith('.png'):
+                    icon = icon[:-4]
+
+                self.icons[ind] = icon
+                self.names[ind] = gameMan.translate(prop['name', ''])
+                ind += 1
+
+        if self.data.can_group():
+            self.icons['all'] = self.data.all_icon
+            self.names['all'] = self.data.all_name
+
         self.url = self.data.url
 
         # attributes used for filtering (tags, authors, packages...)
@@ -162,7 +176,7 @@ class Item:
             tagsPane.add_tag(Section.PACK, self.pak_id, pretty=self.pak_name)
         )
 
-    def get_icon(self, subKey, allow_single=False, single_num=1):
+    def get_icon(self, subKey: int, allow_single: bool=False, single_num=1):
         """Get an icon for the given subkey.
 
         If allow_single is true, the grouping icon can be returned
@@ -170,7 +184,6 @@ class Item:
         Drag-icons have different rules for what counts as 'single', so
         they use the single_num parameter to control the output.
         """
-        icons = self.data.icons
         num_picked = sum(
             1 for item in
             pal_picked if
@@ -178,16 +191,16 @@ class Item:
             )
         if allow_single and self.data.can_group() and num_picked <= single_num:
             # If only 1 copy of this item is on the palette, use the
-            # special icon
+            # special icon.
             img_key = 'all'
         else:
-            img_key = str(subKey)
+            img_key = subKey
 
-        if img_key in icons:
-            return img.icon(icons[img_key])
+        if img_key in self.icons:
+            return img.icon(self.icons[img_key])
         else:
             LOGGER.warning(
-                'Item "{}" in "{}" style has missing PNG '
+                'Item "{}" in "{}" style has missing '
                 'icon for subtype "{}"!',
                 self.id,
                 selected_style,
@@ -372,7 +385,7 @@ class PalItem(Label):
         """
         self.img = self.item.get_icon(self.subKey, self.is_pre)
         try:
-            self.name = gameMan.translate(self.item.names[self.subKey])
+            self.name = self.item.names[self.subKey]
         except IndexError:
             LOGGER.warning(
                 'Item <{}> in <{}> style has mismatched subtype count!',
