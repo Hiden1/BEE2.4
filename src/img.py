@@ -8,7 +8,11 @@ from PIL import ImageTk, Image, ImageDraw
 import os
 
 from srctools import Vec
-from srctools.filesys import FileSystem, RawFileSystem, FileSystemChain
+from srctools.vtf import VTF
+from srctools.filesys import (
+    FileSystem, FileSystemChain,
+    VPKFileSystem, RawFileSystem,
+)
 import srctools.logger
 
 from typing import Iterable, Union, Dict, Tuple
@@ -32,6 +36,7 @@ def load_filesystems(systems: Iterable[FileSystem]):
     """Load in the filesystems used in packages."""
     for sys in systems:
         filesystem.add_sys(sys, 'resources/BEE2/')
+        filesystem.add_sys(sys, 'resources/materials/models/props_map_editor/')
 
 
 def tuple_size(size: Union[Tuple[int, int], int]) -> Tuple[int, int]:
@@ -41,20 +46,24 @@ def tuple_size(size: Union[Tuple[int, int], int]) -> Tuple[int, int]:
     return size, size
 
 
-def png(path: str, resize_to=0, error=None, algo=Image.NEAREST):
+def png(path: str, resize_to=0, error=None, algo=Image.BICUBIC):
     """Loads in an image for use in TKinter.
 
-    - The .png suffix will automatically be added.
-    - Images will be loaded from both the inbuilt files and the extracted
-    zip cache.
+    - This will check for VTF, PNG and JPEG in that order if no extension is
+      provided.
+    - Images will be loaded from both the inbuilt files and packages.
     - If resize_to is set, the image will be resized to that size using the algo
     algorithm.
     - This caches images, so it won't be deleted (Tk doesn't keep a reference
       to the Python object), and subsequent calls don't touch the hard disk.
     """
     path = path.casefold().replace('\\', '/')
+
     if path[-4:-3] != '.':
-        path += ".png"
+        exts = ['.vtf', '.png', '.jpg', '.jpeg']
+    else:
+        exts = [path[-4:]]
+        path = path[:-4]
 
     orig_path = path
 
@@ -65,15 +74,33 @@ def png(path: str, resize_to=0, error=None, algo=Image.NEAREST):
     except KeyError:
         pass
 
-    with filesystem:
-        try:
-            img_file = filesystem[path]
-        except (KeyError, FileNotFoundError):
-            LOGGER.warning('ERROR: "images/{}" does not exist!', orig_path)
-            return error or img_error
-        with img_file.open_bin() as file:
-            image = Image.open(file)  # type: Image.Image
-            image.load()
+    image = None
+    for ext in exts:
+        with filesystem:
+            try:
+                img_file = filesystem[path + ext]
+            except (KeyError, FileNotFoundError):
+                continue
+
+            with img_file.open_bin() as file:
+                if ext == '.vtf':
+                    try:
+                        image = VTF.read(file).to_PIL(0)
+                    except NotImplementedError:
+                        LOGGER.warning(
+                            'VTF library cannot read "{}"!: ',
+                            orig_path,
+                            exc_info=True,
+                        )
+                        break
+                else:
+                    image = Image.open(file)  # type: Image.Image
+                    image.load()
+                break
+
+    if image is None:
+        LOGGER.warning('ERROR: "{}" does not exist!', orig_path)
+        return error or img_error
 
     if resize_to != (0, 0) and resize_to != image.size:
         image = image.resize(resize_to, algo)
@@ -94,7 +121,7 @@ def spr(name, error=None):
 
 def icon(name, error=None):
     """Load in a palette icon, using the correct directory and size."""
-    return png('items/' + name, error=error, resize_to=64)
+    return png(name, error=error, resize_to=64)
 
 
 def get_app_icon():
